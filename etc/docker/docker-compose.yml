@@ -1,0 +1,126 @@
+version: '3.7'
+
+services:
+  sampledemo-web:
+    image: mycompanyname/sampledemo-web:latest
+    container_name: sampledemo-web
+    build:
+      context: ../../../
+      dockerfile: angular/Dockerfile.local
+    ports:
+      - "4200:80"
+    depends_on:
+      - sampledemo-api
+    volumes:
+      - ./dynamic-env.json://usr/share/nginx/html/dynamic-env.json
+    networks:
+      - abp-network
+
+  sampledemo-api:
+    image: mycompanyname/sampledemo-api:latest
+    container_name: sampledemo-api
+    hostname: sampledemo-api
+    build:
+      context: ../../
+      dockerfile: src/SampleDemo.HttpApi.Host/Dockerfile.local
+    environment:
+      - ASPNETCORE_URLS=https://+:443;http://+:80;
+      - Kestrel__Certificates__Default__Path=/root/certificate/localhost.pfx
+      - Kestrel__Certificates__Default__Password=91f91912-5ab0-49df-8166-23377efaf3cc
+      - App__SelfUrl=https://localhost:44354
+      - App__AngularUrl=http://localhost:4200
+      - App__HealthCheckUrl=http://sampledemo-api/health-status
+      - AuthServer__RequireHttpsMetadata=false
+      - AuthServer__Authority=http://sampledemo-identity-server
+      - App__MVCPublicUrl=https://localhost:44306
+      - ConnectionStrings__Default=mongodb://mongodb/SampleDemo
+      - Redis__Configuration=redis
+    ports:
+      - "44354:443"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy  
+    restart: on-failure    
+    volumes:
+      - ./certs:/root/certificate
+    networks:
+      - abp-network
+  
+  sampledemo-authserver:
+    image: mycompanyname/sampledemo-authserver:latest
+    container_name: sampledemo-authserver
+    build:
+      context: ../../
+      dockerfile: src/SampleDemo.AuthServer/Dockerfile.local
+    environment:
+      - ASPNETCORE_URLS=https://+:443;http://+:80;
+      - App__SelfUrl=https://localhost:44334
+      - App__CorsOrigins=https://localhost:44353,https://localhost:44354
+      - AuthServer__RequireHttpsMetadata=false
+      - AuthServer__Authority=http://sampledemo-authserver
+      - AuthServer__SetSelfAsIssuer=true
+      - Kestrel__Certificates__Default__Path=/root/certificate/localhost.pfx
+      - Kestrel__Certificates__Default__Password=91f91912-5ab0-49df-8166-23377efaf3cc
+      - ConnectionStrings__Default=mongodb://mongodb/SampleDemo
+      - Redis__Configuration=redis
+    ports:
+      - "44334:443"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: on-failure
+    volumes:
+      - ./certs:/root/certificate
+    networks:
+      - abp-network
+
+  db-migrator:
+    image: mycompanyname/sampledemo-db-migrator:latest
+    container_name: db-migrator
+    build:
+      context: ../../
+      dockerfile: src/SampleDemo.DbMigrator/Dockerfile.local
+    environment:
+      - ConnectionStrings__Default=mongodb://mongodb/SampleDemo
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - abp-network    
+  
+  mongodb:
+    container_name: mongodb
+    image: mongo:4.2
+    ports:
+      - "27017:27017"
+    volumes:
+       - mongodb_data:/data/db
+    networks:
+      - abp-network
+    healthcheck:
+      test: echo 'db.stats().ok' | mongo localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 10    
+  
+  redis:
+    container_name: redis
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - abp-network  
+    healthcheck:
+      test: ["CMD", "redis-cli","ping"]      
+
+volumes:
+  mongodb_data:
+    name: sampledemo_mongodb_data  
+networks:
+  abp-network:
+    name: sampledemo-network
+    driver: bridge
